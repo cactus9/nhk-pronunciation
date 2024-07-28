@@ -1,2 +1,6 @@
 # Ignored files
 *.sh
+*.pickle
+nhk_pronunciation.csv
+.idea/
+__pycache__/

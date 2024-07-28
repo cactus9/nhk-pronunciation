@@ -11,7 +11,7 @@ import sys
 import time
 
 if sys.version_info.major == 3:
-    from PyQt5.QtWidgets import *
+    from PyQt6.QtWidgets import *
     import pickle
     from html.parser import HTMLParser
 else:
