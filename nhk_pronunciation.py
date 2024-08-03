@@ -18,7 +18,9 @@ else:
     import cPickle as pickle
     from HTMLParser import HTMLParser
 
-from aqt import mw
+import anki
+from anki.hooks import addHook
+from aqt import mw, gui_hooks
 from aqt.qt import *
 from aqt.utils import isMac, isWin, showInfo, showText
 
@@ -38,7 +40,6 @@ AccentEntry = namedtuple('AccentEntry', ['NID','ID','WAVname','K_FLD','ACT','mid
 
 # The main dict used to store all entries
 thedict = {}
-
 
 if sys.version_info.major == 2:
     import json
@@ -73,33 +74,37 @@ if lookup_mecab and not mecab_exists:
 # ************************************************
 #                  Helper functions              *
 # ************************************************
+HIRAGANA = u'がぎぐげござじずぜぞだぢづでどばびぶべぼぱぴぷぺぽ' \
+           u'あいうえおかきくけこさしすせそたちつてと' \
+           u'なにぬねのはひふへほまみむめもやゆよらりるれろ' \
+           u'わをんぁぃぅぇぉゃゅょっ'
+KATAKANA = u'ガギグゲゴザジズゼゾダヂヅデドバビブベボパピプペポ' \
+           u'アイウエオカキクケコサシスセソタチツテト' \
+           u'ナニヌネノハヒフヘホマミムメモヤユヨラリルレロ' \
+           u'ワヲンァィゥェォャュョッ'
 def katakana_to_hiragana(to_translate):
-    hiragana = u'がぎぐげござじずぜぞだぢづでどばびぶべぼぱぴぷぺぽ' \
-               u'あいうえおかきくけこさしすせそたちつてと' \
-               u'なにぬねのはひふへほまみむめもやゆよらりるれろ' \
-               u'わをんぁぃぅぇぉゃゅょっ'
-    katakana = u'ガギグゲゴザジズゼゾダヂヅデドバビブベボパピプペポ' \
-               u'アイウエオカキクケコサシスセソタチツテト' \
-               u'ナニヌネノハヒフヘホマミムメモヤユヨラリルレロ' \
-               u'ワヲンァィゥェォャュョッ'
-    katakana = [ord(char) for char in katakana]
-    translate_table = dict(zip(katakana, hiragana))
+    katakana_ords = [ord(char) for char in KATAKANA]
+    translate_table = dict(zip(katakana_ords, HIRAGANA))
     return to_translate.translate(translate_table)
 
+def hiragana_to_katakana(to_translate):
+    hiragana_ords = [ord(char) for char in HIRAGANA]
+    translate_table = dict(zip(hiragana_ords, KATAKANA))
+    return to_translate.translate(translate_table)
 
 class HTMLTextExtractor(HTMLParser):
-        def __init__(self):
-            if issubclass(self.__class__, object):
-                super(HTMLTextExtractor, self).__init__()
-            else:
-                HTMLParser.__init__(self)
-            self.result = []
+    def __init__(self):
+        if issubclass(self.__class__, object):
+            super(HTMLTextExtractor, self).__init__()
+        else:
+            HTMLParser.__init__(self)
+        self.result = []
 
-        def handle_data(self, d):
-            self.result.append(d)
+    def handle_data(self, d):
+        self.result.append(d)
 
-        def get_text(self):
-            return ''.join(self.result)
+    def get_text(self):
+        return ''.join(self.result)
 
 
 def strip_html_markup(html, recursive=False):
@@ -212,7 +217,7 @@ class MecabController():
             self.mecab.stdin.flush()
             expr = self.mecab.stdout.readline().rstrip(b'\r\n').decode('utf-8')
         except UnicodeDecodeError as e:
-           raise Exception(str(e) + ": Please ensure you have updated to the most recent Japanese Support add-on.")
+            raise Exception(str(e) + ": Please ensure you have updated to the most recent Japanese Support add-on.")
 
         return expr
 
@@ -229,65 +234,35 @@ def format_entry(e):
     txt = e.midashigo1
     strlen = len(txt)
     acclen = len(e.ac)
-    accent = "0"*(strlen-acclen) + e.ac
+    accent = "0" * (strlen - acclen) + e.ac
 
-    # Get the nasal positions
-    nasal = []
-    if e.nasalsoundpos:
-        positions = e.nasalsoundpos.split('0')
-        for p in positions:
-            if p:
-                nasal.append(int(p))
-            if not p:
-                # e.g. "20" would result in ['2', '']
-                nasal[-1] = nasal[-1] * 10
+    # Each word has at most 1 rise and at most 1 fall in pitch, so we can split the word into 4 sections:
+    # 1. Low pitch, pre-rise
+    # 2. High pitch
+    # 3. Fall in pitch
+    # 4. Low pitch, post-fall
+    pre_fall, fall, low_post_fall = accent.partition("2")
+    low_pre_rise, rise_char, post_rise = pre_fall.partition("1")
+    high = rise_char + post_rise
 
-    # Get the no pronounce positions
-    nopron = []
-    if e.nopronouncepos:
-        positions = e.nopronouncepos.split('0')
-        for p in positions:
-            if p:
-                nopron.append(int(p))
-            if not p:
-                # e.g. "20" would result in ['2', '']
-                nopron[-1] = nopron[-1] * 10
+    output = ""
+    chunk_txt = txt[:]
+    split_at_idx = lambda _txt, _idx: (_txt[:_idx], _txt[_idx:])
 
-    outstr = ""
-    overline = False
+    if len(low_pre_rise) != 0:
+        substr, chunk_txt = split_at_idx(chunk_txt, len(low_pre_rise))
+        output += f"<span class='pitch-low-pre'>{substr}</span>"
+    if len(high) != 0:
+        substr, chunk_txt = split_at_idx(chunk_txt, len(high))
+        output += f"<span class='pitch-high'>{substr}</span>"
+    if len(fall) != 0:
+        substr, chunk_txt = split_at_idx(chunk_txt, len(fall))
+        output += f"<span class='pitch-fall'>{substr}</span>"
+    if len(low_post_fall) != 0:
+        substr, chunk_txt = split_at_idx(chunk_txt, len(low_post_fall))
+        output += f"<span class='pitch-low-post'>{substr}</span>"
 
-    for i in range(strlen):
-        a = int(accent[i])
-        # Start or end overline when necessary
-        if not overline and a > 0:
-            outstr = outstr + '<span class="overline">'
-            overline = True
-        if overline and a == 0:
-            outstr = outstr + '</span>'
-            overline = False
-
-        if (i+1) in nopron:
-            outstr = outstr + '<span class="nopron">'
-
-        # Add the character stuff
-        outstr = outstr + txt[i]
-
-        # Add the pronunciation stuff
-        if (i+1) in nopron:
-            outstr = outstr + "</span>"
-        if (i+1) in nasal:
-            outstr = outstr + '<span class="nasal">&#176;</span>'
-
-        # If we go down in pitch, add the downfall
-        if a == 2:
-            outstr = outstr + '</span>&#42780;'
-            overline = False
-
-    # Close the overline if it's still open
-    if overline:
-        outstr = outstr + "</span>"
-
-    return outstr
+    return output
 
 
 def build_database():
@@ -349,14 +324,14 @@ def read_derivative():
 # ************************************************
 def inline_style(txt):
     """ Map style classes to their inline version """
-
-    for k, v in config["styles"].items():
-        txt = txt.replace(k, v)
+    if config["inlineStyle"]:
+        for k, v in config["styles"].items():
+            txt = txt.replace(k, v)
 
     return txt
 
 
-def getPronunciations(expr, sanitize=True, recurse=True):
+def getPronunciations(expr: str, rdg: str =None, sanitize=True, recurse=True):
     """
     Search pronuncations for a particular expression
 
@@ -373,7 +348,15 @@ def getPronunciations(expr, sanitize=True, recurse=True):
     if expr in thedict:
         styled_prons = []
 
+        # If we have a kana reading hint, use that to filter the options
+        if rdg:
+            ktk_reading = hiragana_to_katakana(rdg)
+
         for kana, pron in thedict[expr]:
+            if rdg:
+                if kana != ktk_reading:
+                    continue
+
             inlinepron = inline_style(pron)
 
             if config["pronunciationHiragana"]:
@@ -388,7 +371,7 @@ def getPronunciations(expr, sanitize=True, recurse=True):
 
         if len(split_expr) > 1:
             for expr in split_expr:
-                ret.update(getPronunciations(expr, sanitize))
+                ret.update(getPronunciations(expr, sanitize=sanitize))
 
         # Only if lookups were not succesful, we try splitting with Mecab
         if not ret and lookup_mecab:
@@ -396,13 +379,13 @@ def getPronunciations(expr, sanitize=True, recurse=True):
                 # Avoid infinite recursion by saying that we should not try
                 # Mecab again if we do not find any matches for this sub-
                 # expression.
-                ret.update(getPronunciations(sub_expr, sanitize, False))
+                ret.update(getPronunciations(sub_expr, sanitize=sanitize, recurse=False))
 
     return ret
 
 
-def getFormattedPronunciations(expr, sep_single=" *** ", sep_multi="<br/>\n", expr_sep=None, sanitize=True):
-    prons = getPronunciations(expr, sanitize)
+def getFormattedPronunciations(expr:str, rdg:str=None, sep_single=" *** ", sep_multi="<br/>\n", expr_sep=None, sanitize=True):
+    prons = getPronunciations(expr, rdg, sanitize=sanitize)
 
     single_merge = OrderedDict()
     for k, v in prons.items():
@@ -418,7 +401,7 @@ def getFormattedPronunciations(expr, sep_single=" *** ", sep_multi="<br/>\n", ex
 
 def lookupPronunciation(expr):
     """ Show the pronunciation when the user does a manual lookup """
-    txt = getFormattedPronunciations(expr, "<br/>\n", "<br/><br/>\n", ":<br/>\n")
+    txt = getFormattedPronunciations(expr, None, "<br/>\n", "<br/><br/>\n", ":<br/>\n")
 
     thehtml = """
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
@@ -485,10 +468,12 @@ def onRegenerate(browser):
     regeneratePronunciations(browser.selectedNotes())
 
 
-def get_src_dst_fields(fields):
-    """ Set source and destination fieldnames """
+def get_src_rdg_dst_fields(fields):
+    """ Set source, kana reading, and destination fieldnames """
     src = None
     srcIdx = None
+    rdg = None
+    rdgIdx = None
     dst = None
     dstIdx = None
 
@@ -498,13 +483,20 @@ def get_src_dst_fields(fields):
             srcIdx = i
             break
 
+    for i, f in enumerate(config["rdgFields"]):
+        if f in fields:
+            rdg = f
+            rdgIdx = i
+            break
+
     for i, f in enumerate(config["dstFields"]):
         if f in fields:
             dst = f
             dstIdx = i
             break
 
-    return src, srcIdx, dst, dstIdx
+    return src, srcIdx, rdg, rdgIdx, dst, dstIdx
+
 
 def add_pronunciation_once(fields, model, data, n):
     """ When possible, temporarily set the pronunciation to a field """
@@ -514,50 +506,47 @@ def add_pronunciation_once(fields, model, data, n):
     if config["noteTypes"] and not any(nt.lower() in model['name'].lower() for nt in config["noteTypes"]):
         return fields
 
-    src, srcIdx, dst, dstIdx = get_src_dst_fields(fields)
+    src, _, rdg, _, dst, _ = get_src_rdg_dst_fields(fields)
 
     if src is None or dst is None:
         return fields
 
     # Only add the pronunciation if there's not already one in the pronunciation field
     if not fields[dst]:
-        fields[dst] = getFormattedPronunciations(fields[src])
+        fields[dst] = getFormattedPronunciations(fields[src], fields[rdg])
 
     return fields
 
-def add_pronunciation_focusLost(flag, n, fidx):
+
+def add_pronunciation_note_add(n: anki.notes.Note) -> None:
     # Check if this is a supported note type. If it is not, return.
     # If no note type has been specified, we always continue the lookup proces.
     if config["noteTypes"] and not any(nt.lower() in n.model()['name'].lower() for nt in config["noteTypes"]):
-        return flag
+        return
 
-    from aqt import mw
     fields = mw.col.models.fieldNames(n.model())
 
-    src, srcIdx, dst, dstIdx = get_src_dst_fields(fields)
+    src, srcIdx, rdg, rdgIdx, dst, dstIdx = get_src_rdg_dst_fields(fields)
 
     if not src or not dst:
-        return flag
+        return
 
     # dst field already filled?
     if n[dst]:
-        return flag
-
-    # event coming from src field?
-    if fidx != srcIdx:
-        return flag
+        return
 
     # grab source text
     srcTxt = mw.col.media.strip(n[src])
     if not srcTxt:
-        return flag
+        return
 
     # update field
     try:
-        n[dst] = getFormattedPronunciations(srcTxt)
+        rdgTxt = mw.col.media.strip(n[rdg])
+        n[dst] = getFormattedPronunciations(srcTxt, rdg=rdgTxt)
+        mw.col.update_note(n)
     except Exception as e:
         raise
-    return True
 
 
 def regeneratePronunciations(nids):
@@ -571,7 +560,7 @@ def regeneratePronunciations(nids):
         if config["noteTypes"] and not any(nt.lower() in note.model()['name'].lower() for nt in config["noteTypes"]):
             continue
 
-        src, srcIdx, dst, dstIdx = get_src_dst_fields(note)
+        src, srcIdx, rdg, rdgIdx, dst, dstIdx = get_src_rdg_dst_fields(note)
 
         if src is None or dst is None:
             continue
@@ -581,11 +570,11 @@ def regeneratePronunciations(nids):
             continue
 
         srcTxt = mw.col.media.strip(note[src])
+        rdgTxt = mw.col.media.strip(note[rdg])
         if not srcTxt.strip():
             continue
 
-        note[dst] = getFormattedPronunciations(srcTxt)
-
+        note[dst] = getFormattedPronunciations(srcTxt, rdg=rdgTxt)
         note.flush()
     mw.progress.finish()
     mw.reset()
@@ -618,11 +607,9 @@ else:
 # Create the manual look-up menu entry
 createMenu()
 
-from anki.hooks import addHook
-
 addHook("mungeFields", add_pronunciation_once)
 
-addHook('editFocusLost', add_pronunciation_focusLost)
+gui_hooks.add_cards_did_add_note.append(add_pronunciation_note_add)
 
 # Bulk add
 addHook("browser.setupMenus", setupBrowserMenu)

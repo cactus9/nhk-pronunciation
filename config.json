@@ -1,13 +1,17 @@
 {
-	"styles": {"class=\"overline\"": "style=\"text-decoration:overline;\"",
-			   "class=\"nopron\"": "style=\"color: royalblue;\"",
-			   "class=\"nasal\"": "style=\"color: red;\"",
-			   "&#42780;": "&#42780;"},
-	"noteTypes": [],
-	"srcFields": ["Expression", "Kanji Word"],
-	"dstFields": ["Pronunciation"],
+	"styles": {
+		"class=\"pitch-high\"": "style=\"border-top: #FF6633 1px solid;\"",
+		"class=\"pitch-fall\"": "style=\"border-top: #FF6633 1px solid; border-right: #FF6633 1px solid;\"",
+		"class=\"pitch-low-pre\"": "style=\"border-bottom: #FF6633 1px solid; border-right: #FF6633 1px solid;\"",
+		"class=\"pitch-low-post\"": "style=\"border-bottom: #FF6633 1px solid; border-left: #FF6633 1px solid;\""
+	},
+	"inlineStyle": false,
+	"noteTypes": ["Japanese vocab with pitch"],
+	"srcFields": ["Back"],
+	"rdgFields": ["Reading", "Pronunciation"],
+	"dstFields": ["PitchAccent"],
 	"regenerateReadings": false,
-	"pronunciationHiragana": false,
-	"useMecab": true,
+	"pronunciationHiragana": true,
+	"useMecab": false,
 	"lookupShortcut": ""
 }
