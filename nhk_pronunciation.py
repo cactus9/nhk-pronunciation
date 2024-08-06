@@ -231,7 +231,7 @@ if lookup_mecab:
 # ************************************************
 def format_entry(e):
     """ Format an entry from the data in the original database to something that uses html """
-    txt = e.midashigo1
+    txt = e.midashigo # midashigo1 devoices nasalised g* kana (e.g. it records 長い as ナカイ), so use the unaltered version
     strlen = len(txt)
     acclen = len(e.ac)
     accent = "0" * (strlen - acclen) + e.ac
@@ -359,6 +359,10 @@ def getPronunciations(expr: str, rdg: str =None, sanitize=True, recurse=True):
 
             inlinepron = inline_style(pron)
 
+            if config["preserveKanaSpelling"]:
+                # If there's no katakana in the expression, we'd prefer to use hiragana
+                if all(c not in KATAKANA for c in expr):
+                    inlinepron = katakana_to_hiragana(inlinepron)
             if config["pronunciationHiragana"]:
                 inlinepron = katakana_to_hiragana(inlinepron)
 

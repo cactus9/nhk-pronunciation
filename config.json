@@ -13,5 +13,6 @@
 	"regenerateReadings": false,
 	"pronunciationHiragana": true,
 	"useMecab": false,
-	"lookupShortcut": ""
+	"lookupShortcut": "",
+	"preserveKanaSpelling": true
 }
