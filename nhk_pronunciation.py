@@ -329,16 +329,16 @@ def format_entry(e: DatabaseEntry, kana_spelling: str = None) -> str:
 
     if len(low_pre_rise) != 0:
         substr, chunk_txt = split_at_idx(chunk_txt, len(low_pre_rise))
-        output += f"<span class='pitch-low-pre'>{rejoin(substr)}</span>"
+        output += f'<span class="pitch-low-pre">{rejoin(substr)}</span>'
     if len(high) != 0:
         substr, chunk_txt = split_at_idx(chunk_txt, len(high))
-        output += f"<span class='pitch-high'>{rejoin(substr)}</span>"
+        output += f'<span class="pitch-high">{rejoin(substr)}</span>'
     if len(fall) != 0:
         substr, chunk_txt = split_at_idx(chunk_txt, len(fall))
-        output += f"<span class='pitch-fall'>{rejoin(substr)}</span>"
+        output += f'<span class="pitch-fall">{rejoin(substr)}</span>'
     if len(low_post_fall) != 0:
         substr, chunk_txt = split_at_idx(chunk_txt, len(low_post_fall))
-        output += f"<span class='pitch-low-post'>{rejoin(substr)}</span>"
+        output += f'<span class="pitch-low-post">{rejoin(substr)}</span>'
 
     return output
 
@@ -428,6 +428,42 @@ def getPronunciations(expr: str, rdg: str = None, sanitize=True, recurse=True):
         expr = expr.strip()
 
     ret = OrderedDict()
+
+    # Separate out particles
+    particle = None
+    if config["formatParticles"] and expr not in thedict:
+        # The particle may be signalled in the original expression and/or the user-provided reading
+        expr_particle = None
+        rdg_particle = None
+
+        if any(sep in expr for sep in config["particleSeparators"]):
+            expr, expr_particle = re.split(
+                pattern=f"[{','.join(config['particleSeparators'])}]",
+                string=expr,
+                maxsplit=1,
+            )
+        if rdg is not None and any(sep in rdg for sep in config["particleSeparators"]):
+            rdg, rdg_particle = re.split(
+                pattern=f"[{','.join(config['particleSeparators'])}]",
+                string=rdg,
+                maxsplit=1,
+            )
+
+        # Sanity check that everything aligns properly
+        if expr_particle is not None and rdg_particle is not None:
+            if expr_particle != rdg_particle:
+                return ret
+        elif rdg_particle is not None:
+            expr, expr_particle = expr[: -len(rdg_particle)], expr[-len(rdg_particle) :]
+            if expr_particle != rdg_particle:
+                return ret
+        elif expr_particle is not None:
+            rdg, rdg_particle = rdg[: -len(expr_particle)], rdg[-len(expr_particle) :]
+            if expr_particle != rdg_particle:
+                return ret
+
+        particle = expr_particle
+
     if expr in thedict:
         styled_prons = []
 
@@ -447,6 +483,8 @@ def getPronunciations(expr: str, rdg: str = None, sanitize=True, recurse=True):
             pron = format_entry(
                 database_entry, rdg if have_preserved_kana_spelling else None
             )
+            if particle is not None:
+                pron += f'<span class="pitch-particle">{particle}</span>'
 
             inlinepron = inline_style(pron)
 
@@ -459,7 +497,9 @@ def getPronunciations(expr: str, rdg: str = None, sanitize=True, recurse=True):
 
             if inlinepron not in styled_prons:
                 styled_prons.append(inlinepron)
+
         ret[expr] = styled_prons
+
     elif recurse:
         # Try to split the expression in various ways, and check if any of those results
         split_expr = split_separators(expr)

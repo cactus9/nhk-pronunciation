@@ -3,7 +3,8 @@
 		"class=\"pitch-high\"": "style=\"border-top: #FF6633 1px solid;\"",
 		"class=\"pitch-fall\"": "style=\"border-top: #FF6633 1px solid; border-right: #FF6633 1px solid;\"",
 		"class=\"pitch-low-pre\"": "style=\"border-bottom: #FF6633 1px solid; border-right: #FF6633 1px solid;\"",
-		"class=\"pitch-low-post\"": "style=\"border-bottom: #FF6633 1px solid; border-left: #FF6633 1px solid;\"",
+		"class=\"pitch-low-post\"": "style=\"border-bottom: #FF6633 1px solid;\"",
+		"class=\"pitch-particle\"": "",
 		"class=\"pron-nasal\"": "style=\"color: #8cdae6;\"",
 		"class=\"pron-no\"": "style=\"opacity: 50%;\""
 	},
@@ -18,5 +19,7 @@
 	"pronunciationHiragana": true,
 	"useMecab": false,
 	"lookupShortcut": "",
-	"preserveKanaSpelling": true
+	"preserveKanaSpelling": true,
+	"formatParticles": true,
+	"particleSeparators": ["_","＿"]
 }
