@@ -226,9 +226,9 @@ if lookup_mecab:
 # ************************************************
 #           Database generation functions        *
 # ************************************************
-def format_entry(e: DatabaseEntry) -> str:
+def format_entry(e: DatabaseEntry, kana_spelling: str=None) -> str:
     """ Format an entry from the data in the derivative database to something that uses html """
-    txt = list(e.midashigo[:]) # midashigo1 devoices nasalised g* kana (e.g. it records 長い as ナカイ), so use the unaltered version
+    txt = list(e.midashigo[:]) if kana_spelling is None else list(kana_spelling)
     strlen = len(txt)
     acclen = len(e.ac)
     accent = "0" * (strlen - acclen) + e.ac
@@ -297,6 +297,7 @@ def build_database():
 
     for e in entries:
         # A tuple holding the spelling in katakana and the info for pitch accent, nasal positions, and no-pronounce positions
+        # midashigo1 devoices nasalised g* kana (e.g. it records 長い as ナカイ), so use the unaltered version
         database_entry = DatabaseEntry(e.midashigo, e.ac, unformat_accdb_indices(e.nasalsoundpos), unformat_accdb_indices(e.nopronouncepos))
 
         # Add expressions for both
@@ -361,19 +362,23 @@ def getPronunciations(expr: str, rdg: str =None, sanitize=True, recurse=True):
             ktk_reading = hiragana_to_katakana(rdg)
 
         for database_entry in thedict[expr]:
+            have_preserved_kana_spelling = False
             if rdg:
                 if database_entry.midashigo != ktk_reading:
                     continue
+                elif config["preserveKanaSpelling"]:
+                    # We found a pronunciation with the same kana and long-vowel transcription as the user-provided reading, so we are safe to use the user-provided one directly
+                    have_preserved_kana_spelling = True
 
-            pron = format_entry(database_entry)
+            pron = format_entry(database_entry, rdg if have_preserved_kana_spelling else None)
 
             inlinepron = inline_style(pron)
 
-            if config["preserveKanaSpelling"]:
+            if config["preserveKanaSpelling"] and not have_preserved_kana_spelling:
                 # If there's no katakana in the expression, we'd prefer to use hiragana
                 if all(c not in KATAKANA for c in expr):
                     inlinepron = katakana_to_hiragana(inlinepron)
-            if config["pronunciationHiragana"]:
+            elif config["pronunciationHiragana"] and not have_preserved_kana_spelling:
                 inlinepron = katakana_to_hiragana(inlinepron)
 
             if inlinepron not in styled_prons:
