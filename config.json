@@ -23,5 +23,6 @@
 	"parseParticles": true,
 	"particleSeparators": ["_","＿"],
 	"parseWords": true,
-	"wordSeparators": [" ","　"]
+	"wordSeparators": [" ","　"],
+	"removeSeparatorsFromSrcField": true
 }

@@ -696,6 +696,17 @@ def get_src_rdg_dst_fields(fields):
     return src, srcIdx, rdg, rdgIdx, dst, dstIdx
 
 
+def sanitiseFieldSeparators(txt):
+    no_particle_seps = re.sub(
+        pattern=f"[{','.join(config['particleSeparators'])}]", repl="", string=txt
+    )
+    return re.sub(
+        pattern=f"[{','.join(config['wordSeparators'])}]",
+        repl="",
+        string=no_particle_seps,
+    )
+
+
 def add_pronunciation_once(fields, model, data, n):
     """When possible, temporarily set the pronunciation to a field"""
 
@@ -714,7 +725,8 @@ def add_pronunciation_once(fields, model, data, n):
     # Only add the pronunciation if there's not already one in the pronunciation field
     if not fields[dst]:
         fields[dst] = getFormattedPronunciations(fields[src], fields[rdg])
-
+        if config["removeSeparatorsFromSrcField"]:
+            fields[src] = sanitiseFieldSeparators(fields[src])
     return fields
 
 
@@ -746,6 +758,8 @@ def add_pronunciation_note_add(n: anki.notes.Note) -> None:
     try:
         rdgTxt = mw.col.media.strip(n[rdg])
         n[dst] = getFormattedPronunciations(srcTxt, rdg=rdgTxt)
+        if config["removeSeparatorsFromSrcField"]:
+            n[src] = sanitiseFieldSeparators(srcTxt)
         mw.col.update_note(n)
     except Exception as e:
         raise
@@ -779,6 +793,8 @@ def regeneratePronunciations(nids):
             continue
 
         note[dst] = getFormattedPronunciations(srcTxt, rdg=rdgTxt)
+        if config["removeSeparatorsFromSrcField"]:
+            note[src] = sanitiseFieldSeparators(srcTxt)
         note.flush()
     mw.progress.finish()
     mw.reset()
