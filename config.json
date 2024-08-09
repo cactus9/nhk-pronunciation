@@ -8,7 +8,7 @@
 		"class=\"pron-nasal\"": "style=\"color: #8cdae6;\"",
 		"class=\"pron-no\"": "style=\"opacity: 50%;\""
 	},
-	"inlineStyle": true,
+	"inlineStyle": false,
 	"noteTypes": ["Japanese vocab with pitch"],
 	"srcFields": ["Back"],
 	"rdgFields": ["Reading", "Pronunciation"],
