@@ -20,6 +20,8 @@
 	"useMecab": false,
 	"lookupShortcut": "",
 	"preserveKanaSpelling": true,
-	"formatParticles": true,
-	"particleSeparators": ["_","＿"]
+	"parseParticles": true,
+	"particleSeparators": ["_","＿"],
+	"parseWords": true,
+	"wordSeparators": [" ","　"]
 }

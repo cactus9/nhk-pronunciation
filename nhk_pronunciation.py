@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-
+import os.path
 import re
 import subprocess
 import sys
@@ -294,7 +294,9 @@ if lookup_mecab:
 # ************************************************
 #           Database generation functions        *
 # ************************************************
-def format_entry(e: DatabaseEntry, kana_spelling: str = None) -> str:
+def format_entry(
+    e: DatabaseEntry, kana_spelling: str = None, prev_pitch_high: bool = False
+) -> tuple[str, bool]:
     """Format an entry from the data in the derivative database to something that uses html"""
     txt = list(e.midashigo[:]) if kana_spelling is None else list(kana_spelling)
     strlen = len(txt)
@@ -322,6 +324,10 @@ def format_entry(e: DatabaseEntry, kana_spelling: str = None) -> str:
     low_pre_rise, rise_char, post_rise = pre_fall.partition("1")
     high = rise_char + post_rise
 
+    if prev_pitch_high:
+        # Pitch stays high until it hits a fall
+        low_pre_rise, high = "", low_pre_rise + high
+
     output = ""
     chunk_txt = txt[:]
     split_at_idx = lambda _txt, _idx: (_txt[:_idx], _txt[_idx:])
@@ -340,7 +346,7 @@ def format_entry(e: DatabaseEntry, kana_spelling: str = None) -> str:
         substr, chunk_txt = split_at_idx(chunk_txt, len(low_post_fall))
         output += f'<span class="pitch-low-post">{rejoin(substr)}</span>'
 
-    return output
+    return output, len(fall) == 0  # pitch ends high
 
 
 def unformat_accdb_indices(idxs: str) -> str:
@@ -414,7 +420,9 @@ def inline_style(txt):
     return txt
 
 
-def getPronunciations(expr: str, rdg: str = None, sanitize=True, recurse=True):
+def getPronunciations(
+    expr: str, rdg: str = None, sanitize=True, recurse=True, prev_pitch_high=False
+) -> OrderedDict[str, list[tuple[str, bool]]]:
     """
     Search pronuncations for a particular expression
 
@@ -431,7 +439,7 @@ def getPronunciations(expr: str, rdg: str = None, sanitize=True, recurse=True):
 
     # Separate out particles
     particle = None
-    if config["formatParticles"] and expr not in thedict:
+    if config["parseParticles"] and expr not in thedict:
         # The particle may be signalled in the original expression and/or the user-provided reading
         expr_particle = None
         rdg_particle = None
@@ -442,7 +450,7 @@ def getPronunciations(expr: str, rdg: str = None, sanitize=True, recurse=True):
                 string=expr,
                 maxsplit=1,
             )
-        if rdg is not None and any(sep in rdg for sep in config["particleSeparators"]):
+        if rdg and any(sep in rdg for sep in config["particleSeparators"]):
             rdg, rdg_particle = re.split(
                 pattern=f"[{','.join(config['particleSeparators'])}]",
                 string=rdg,
@@ -457,7 +465,7 @@ def getPronunciations(expr: str, rdg: str = None, sanitize=True, recurse=True):
             expr, expr_particle = expr[: -len(rdg_particle)], expr[-len(rdg_particle) :]
             if expr_particle != rdg_particle:
                 return ret
-        elif expr_particle is not None:
+        elif expr_particle is not None and rdg:
             rdg, rdg_particle = rdg[: -len(expr_particle)], rdg[-len(expr_particle) :]
             if expr_particle != rdg_particle:
                 return ret
@@ -480,8 +488,10 @@ def getPronunciations(expr: str, rdg: str = None, sanitize=True, recurse=True):
                     # We found a pronunciation with the same kana and long-vowel transcription as the user-provided reading, so we are safe to use the user-provided one directly
                     have_preserved_kana_spelling = True
 
-            pron = format_entry(
-                database_entry, rdg if have_preserved_kana_spelling else None
+            pron, ended_high = format_entry(
+                database_entry,
+                rdg if have_preserved_kana_spelling else None,
+                prev_pitch_high,
             )
             if particle is not None:
                 pron += f'<span class="pitch-particle">{particle}</span>'
@@ -495,8 +505,8 @@ def getPronunciations(expr: str, rdg: str = None, sanitize=True, recurse=True):
             elif config["pronunciationHiragana"] and not have_preserved_kana_spelling:
                 inlinepron = katakana_to_hiragana(inlinepron)
 
-            if inlinepron not in styled_prons:
-                styled_prons.append(inlinepron)
+            if (inlinepron, ended_high) not in styled_prons:
+                styled_prons.append((inlinepron, ended_high))
 
         ret[expr] = styled_prons
 
@@ -529,11 +539,49 @@ def getFormattedPronunciations(
     expr_sep=None,
     sanitize=True,
 ):
-    prons = getPronunciations(expr, rdg, sanitize=sanitize)
+    if not config["parseWords"] or not any(
+        sep in expr for sep in config["wordSeparators"]
+    ):
+        prons = getPronunciations(expr, rdg, sanitize=sanitize)
+    else:
+        # Word boundaries must be signalled by the user in the expression
+        expr_words = re.split(
+            pattern=f"[{','.join(config['wordSeparators'])}]",
+            string=expr,
+        )
+
+        # If we have a reading, use it iff it has the same parse
+        if rdg:
+            rdg_words = re.split(
+                pattern=f"[{','.join(config['wordSeparators'])}]",
+                string=rdg,
+            )
+            if len(expr_words) != len(rdg_words):
+                # They don't match, discard the user-supplied reading
+                rdg_words = [None for _ in expr_words]
+        else:
+            rdg_words = [None for _ in expr_words]
+
+        prev_pitch_high = False
+        phrase_pron = ""
+        for expr_word, rdg_word in zip(expr_words, rdg_words):
+            word_prons_dict = getPronunciations(
+                expr_word, rdg_word, sanitize=sanitize, prev_pitch_high=prev_pitch_high
+            )
+            try:
+                first_word_key = next(iter(word_prons_dict.keys()))
+                word_pron, prev_pitch_high = word_prons_dict[first_word_key][0]
+                phrase_pron += word_pron
+            except StopIteration:
+                # Something doesn't have a pronunciation, abort
+                phrase_pron = ""
+                break
+        prons = OrderedDict()
+        prons[expr] = [(phrase_pron, prev_pitch_high)]
 
     single_merge = OrderedDict()
-    for k, v in prons.items():
-        single_merge[k] = sep_single.join(v)
+    for k, vlist in prons.items():
+        single_merge[k] = sep_single.join([v for v, _ in vlist])
 
     if expr_sep:
         txt = sep_multi.join(
