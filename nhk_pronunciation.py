@@ -2,13 +2,9 @@
 
 from collections import namedtuple, OrderedDict
 
-import io
 import re
-import os
-import platform
 import subprocess
 import sys
-import time
 
 if sys.version_info.major == 3:
     from PyQt6.QtWidgets import *
@@ -37,13 +33,14 @@ accent_database = os.path.join(dir_path, "ACCDB_unicode.csv")
 
 # "Class" declaration
 AccentEntry = namedtuple('AccentEntry', ['NID','ID','WAVname','K_FLD','ACT','midashigo','nhk','kanjiexpr','NHKexpr','numberchars','nopronouncepos','nasalsoundpos','majiri','kaisi','KWAV','midashigo1','akusentosuu','bunshou','ac'])
+DatabaseEntry = namedtuple(typename="DatabaseEntry", field_names=["midashigo", "ac", "nasalpos", "nopronpos"])
 
 # The main dict used to store all entries
-thedict = {}
+thedict : dict[str, list[DatabaseEntry]] = {}
 
 if sys.version_info.major == 2:
     import json
-    config = json.load(io.open(os.path.join(dir_path, 'nhk_pronunciation_config.json'), 'r', encoding="utf-8"))
+    config = json.load(open(os.path.join(dir_path, 'nhk_pronunciation_config.json'), 'r', encoding="utf-8"))
 else:
     config = mw.addonManager.getConfig(__name__)
 
@@ -229,12 +226,25 @@ if lookup_mecab:
 # ************************************************
 #           Database generation functions        *
 # ************************************************
-def format_entry(e):
-    """ Format an entry from the data in the original database to something that uses html """
-    txt = e.midashigo # midashigo1 devoices nasalised g* kana (e.g. it records 長い as ナカイ), so use the unaltered version
+def format_entry(e: DatabaseEntry) -> str:
+    """ Format an entry from the data in the derivative database to something that uses html """
+    txt = list(e.midashigo[:]) # midashigo1 devoices nasalised g* kana (e.g. it records 長い as ナカイ), so use the unaltered version
     strlen = len(txt)
     acclen = len(e.ac)
     accent = "0" * (strlen - acclen) + e.ac
+
+    # Nasalization
+    if config["includeNasalPronunciation"] and e.nasalpos != "-":
+        for str_idx in e.nasalpos:
+            idx = int(str_idx) - 1
+            txt[idx] = f"<span class=\"pron-nasal\">{txt[idx]}</span>"
+
+    # Devoiced kana
+    if config["includeNoPronunciation"] and e.nopronpos != "-":
+        for str_idx in e.nopronpos:
+            idx = int(str_idx) - 1
+            txt[idx] = f"<span class=\"pron-no\">{txt[idx]}</span>"
+
 
     # Each word has at most 1 rise and at most 1 fall in pitch, so we can split the word into 4 sections:
     # 1. Low pitch, pre-rise
@@ -248,75 +258,73 @@ def format_entry(e):
     output = ""
     chunk_txt = txt[:]
     split_at_idx = lambda _txt, _idx: (_txt[:_idx], _txt[_idx:])
+    rejoin = lambda s: "".join(s)
 
     if len(low_pre_rise) != 0:
         substr, chunk_txt = split_at_idx(chunk_txt, len(low_pre_rise))
-        output += f"<span class='pitch-low-pre'>{substr}</span>"
+        output += f"<span class='pitch-low-pre'>{rejoin(substr)}</span>"
     if len(high) != 0:
         substr, chunk_txt = split_at_idx(chunk_txt, len(high))
-        output += f"<span class='pitch-high'>{substr}</span>"
+        output += f"<span class='pitch-high'>{rejoin(substr)}</span>"
     if len(fall) != 0:
         substr, chunk_txt = split_at_idx(chunk_txt, len(fall))
-        output += f"<span class='pitch-fall'>{substr}</span>"
+        output += f"<span class='pitch-fall'>{rejoin(substr)}</span>"
     if len(low_post_fall) != 0:
         substr, chunk_txt = split_at_idx(chunk_txt, len(low_post_fall))
-        output += f"<span class='pitch-low-post'>{substr}</span>"
+        output += f"<span class='pitch-low-post'>{rejoin(substr)}</span>"
 
     return output
 
+def unformat_accdb_indices(idxs: str) -> str:
+    if idxs:
+        return "".join(idxs.split("0"))
+    else:
+        return "-"
 
 def build_database():
     """ Build the derived database from the original database """
     tempdict = {}
     entries = []
 
-    f = io.open(accent_database, 'r', encoding="utf-8")
-    for line in f:
-        line = line.strip()
-        substrs = re.findall(r'(\{.*?,.*?\})', line)
-        substrs.extend(re.findall(r'(\(.*?,.*?\))', line))
-        for s in substrs:
-            line = line.replace(s, s.replace(',', ';'))
-        entries.append(AccentEntry._make(line.split(",")))
-    f.close()
+    with open(accent_database, 'r', encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            substrs = re.findall(r'(\{.*?,.*?\})', line)
+            substrs.extend(re.findall(r'(\(.*?,.*?\))', line))
+            for s in substrs:
+                line = line.replace(s, s.replace(',', ';'))
+            entries.append(AccentEntry._make(line.split(",")))
 
     for e in entries:
-        textentry = format_entry(e)
-
-        # A tuple holding both the spelling in katakana, and the katakana with pitch/accent markup
-        kanapron = (e.midashigo, textentry)
+        # A tuple holding the spelling in katakana and the info for pitch accent, nasal positions, and no-pronounce positions
+        database_entry = DatabaseEntry(e.midashigo, e.ac, unformat_accdb_indices(e.nasalsoundpos), unformat_accdb_indices(e.nopronouncepos))
 
         # Add expressions for both
         for key in [e.nhk, e.kanjiexpr]:
             if key in tempdict:
-                if kanapron not in tempdict[key]:
-                    tempdict[key].append(kanapron)
+                if database_entry not in tempdict[key]:
+                    tempdict[key].append(database_entry)
             else:
-                tempdict[key] = [kanapron]
+                tempdict[key] = [database_entry]
 
-    o = io.open(derivative_database, 'w', encoding="utf-8")
-
-    for key in tempdict.keys():
-        for kana, pron in tempdict[key]:
-            o.write("%s\t%s\t%s\n" % (key, kana, pron))
-
-    o.close()
+    with open(derivative_database, 'w', encoding="utf-8") as o:
+        for key in tempdict.keys():
+            for database_entry in tempdict[key]:
+                o.write("\t".join([key] + list(database_entry)) + "\n")
 
 
 def read_derivative():
     """ Read the derivative file to memory """
-    f = io.open(derivative_database, 'r', encoding="utf-8")
-
-    for line in f:
-        key, kana, pron = line.strip().split("\t")
-        kanapron = (kana, pron)
-        if key in thedict:
-            if kanapron not in thedict[key]:
-                thedict[key].append(kanapron)
-        else:
-            thedict[key] = [kanapron]
-
-    f.close()
+    with open(derivative_database, 'r', encoding="utf-8") as f:
+        for line in f:
+            key_value_entry = line.strip().split("\t")
+            key = key_value_entry[0]
+            database_entry = DatabaseEntry._make(key_value_entry[1:])
+            if key in thedict:
+                if database_entry not in thedict[key]:
+                    thedict[key].append(database_entry)
+            else:
+                thedict[key] = [database_entry]
 
 
 # ************************************************
@@ -352,10 +360,12 @@ def getPronunciations(expr: str, rdg: str =None, sanitize=True, recurse=True):
         if rdg:
             ktk_reading = hiragana_to_katakana(rdg)
 
-        for kana, pron in thedict[expr]:
+        for database_entry in thedict[expr]:
             if rdg:
-                if kana != ktk_reading:
+                if database_entry.midashigo != ktk_reading:
                     continue
+
+            pron = format_entry(database_entry)
 
             inlinepron = inline_style(pron)
 
@@ -599,14 +609,12 @@ if (os.path.exists(accent_database) and not os.path.exists(derivative_database))
 # If a pickle exists of the derivative file, use that. Otherwise, read from the derivative file and generate a pickle.
 if  (os.path.exists(derivative_pickle) and
     os.stat(derivative_pickle).st_mtime > os.stat(derivative_database).st_mtime):
-    f = io.open(derivative_pickle, 'rb')
-    thedict = pickle.load(f)
-    f.close()
+    with open(derivative_pickle, 'rb') as f:
+        thedict = pickle.load(f)
 else:
     read_derivative()
-    f = io.open(derivative_pickle, 'wb')
-    pickle.dump(thedict, f, pickle.HIGHEST_PROTOCOL)
-    f.close()
+    with open(derivative_pickle, 'wb') as f:
+        pickle.dump(thedict, f, pickle.HIGHEST_PROTOCOL)
 
 # Create the manual look-up menu entry
 createMenu()
